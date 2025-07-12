@@ -56,6 +56,7 @@ type reportConfig struct {
 	excludes                  []string
 	filterRegexps             []string
 	excludeRegexps            []string
+	ignoreSimpleImageTagChangesOnRegex     []string
 }
 
 var defaults = reportConfig{
@@ -77,6 +78,7 @@ var defaults = reportConfig{
 	excludes:                  nil,
 	filterRegexps:             nil,
 	excludeRegexps:            nil,
+	ignoreSimpleImageTagChangesOnRegex:     nil,
 }
 
 var reportOptions reportConfig
@@ -93,6 +95,7 @@ func applyReportOptionsFlags(cmd *cobra.Command) {
 	cmd.Flags().StringSliceVar(&reportOptions.excludeRegexps, "exclude-regexp", defaults.excludeRegexps, "exclude reports from a set of differences based on supplied regular expressions")
 	cmd.Flags().BoolVarP(&reportOptions.ignoreValueChanges, "ignore-value-changes", "v", defaults.ignoreValueChanges, "exclude changes in values")
 	cmd.Flags().BoolVar(&reportOptions.detectRenames, "detect-renames", defaults.detectRenames, "enable detection for renames (document level for Kubernetes resources)")
+	cmd.Flags().StringSliceVar(&reportOptions.ignoreSimpleImageTagChangesOnRegex, "ignore-simple-image-tag-changes-on-regex", defaults.ignoreSimpleImageTagChangesOnRegex, "if the image name matches this regex, simple semver version changes will be ignored, e.g. 'v1.0.0' to 'v1.0.1' will not be reported as a change")
 
 	// Main output preferences
 	cmd.Flags().StringVarP(&reportOptions.style, "output", "o", defaults.style, "specify the output style, supported styles: human, brief, github, gitlab, gitea")

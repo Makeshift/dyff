@@ -22,7 +22,9 @@ package dyff
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gonvenience/bunt"
@@ -44,6 +46,7 @@ type compareSettings struct {
 	KubernetesEntityDetection                bool
 	DetectRenames                            bool
 	AdditionalIdentifiers                    []string
+	IgnoreSimpleImageTagChangesOnRegex       []string
 }
 
 type compare struct {
@@ -93,6 +96,13 @@ func KubernetesEntityDetection(value bool) CompareOption {
 func DetectRenames(value bool) CompareOption {
 	return func(settings *compareSettings) {
 		settings.DetectRenames = value
+	}
+}
+
+// IgnoreSimpleImageTagChangesOnRegex sets the regex patterns for image names where simple semver tag changes should be ignored
+func IgnoreSimpleImageTagChangesOnRegex(patterns []string) CompareOption {
+	return func(settings *compareSettings) {
+		settings.IgnoreSimpleImageTagChangesOnRegex = patterns
 	}
 }
 
@@ -654,12 +664,77 @@ func (compare *compare) namedEntryLists(path ytbx.Path, identifier listItemIdent
 	return packChangesAndAddToResult(result, path, orderChanges, additions, removals)
 }
 
+// isSimpleImageTagChange checks if a version change is only a minor/patch semver change
+// e.g., from "v1.0.0" to "v1.1.1"
+func isSimpleImageTagChange(from, to string) bool {
+	from = strings.TrimPrefix(from, "v")
+	to = strings.TrimPrefix(to, "v")
+
+	// Split version parts by '.' to get major.minor.patch
+	fromParts := strings.Split(from, ".")
+	toParts := strings.Split(to, ".")
+	
+	allParts := append(fromParts, toParts...)
+	
+	// Check if all parts are numeric
+	// If not, there might be some snapshot shenanigans going on, so assume it's not a simple change
+	for _, part := range allParts {
+		if _, err := strconv.Atoi(part); err != nil {
+			return false
+		}
+	}
+
+			// If wrong number of parts
+	if len(fromParts) != 3 || len(toParts) != 3 ||
+		 // Major version changed
+		 fromParts[0] != toParts[0] {
+		return false
+	}
+
+	return true
+}
+
 func (compare *compare) nodeValues(path ytbx.Path, from *yamlv3.Node, to *yamlv3.Node) ([]Diff, error) {
 	if strings.Compare(from.Value, to.Value) != 0 {
 		// leave and don't report any differences if ignore whitespaces changes is
 		// configured and it is really only a whitespace only change between the strings
 		if compare.settings.IgnoreWhitespaceChanges && isWhitespaceOnlyChange(from.Value, to.Value) {
 			return nil, nil
+		}
+
+		// If the path ends with 'image' and we should ignore simple image tag changes
+		if len(compare.settings.IgnoreSimpleImageTagChangesOnRegex) > 0 {
+			// Check if the path ends with 'image'
+			pathString := path.String()
+			if strings.HasSuffix(pathString, "/image") {
+				// Split both from and to values to get image name and tag
+				fromParts := strings.Split(from.Value, ":")
+				toParts := strings.Split(to.Value, ":")
+			
+				// If they have exactly two parts (image name and tag)
+				if len(fromParts) == 2 && len(toParts) == 2 {
+					fromImageName := fromParts[0]
+					toImageName := toParts[0]
+					
+					fromTag := fromParts[1]
+					toTag := toParts[1]
+					
+					// If image names are the same, and the tags differ, check if the image name matches our regex patterns
+					if (fromImageName == toImageName) && (fromTag != toTag) {
+						for _, pattern := range compare.settings.IgnoreSimpleImageTagChangesOnRegex {
+							matched, err := regexp.MatchString(pattern, fromImageName)
+							if err == nil && matched {
+
+								// If the image name matches our pattern, check if this is a simple semver tag change
+								if isSimpleImageTagChange(fromTag, toTag) {
+									return nil, nil
+								}
+								break
+							}
+						}
+					}
+				}
+			}
 		}
 
 		return []Diff{{
